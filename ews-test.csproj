@@ -34,7 +34,7 @@
   <ItemGroup>
     <Reference Include="Microsoft.Exchange.WebServices, Version=15.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>EWS_2.0\Microsoft.Exchange.WebServices.dll</HintPath>
+      <HintPath>EWS_2.2\lib\40\Microsoft.Exchange.WebServices.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
