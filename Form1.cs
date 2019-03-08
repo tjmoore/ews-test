@@ -1,7 +1,6 @@
 ﻿using Microsoft.Exchange.WebServices.Autodiscover;
 using Microsoft.Exchange.WebServices.Data;
 using System;
-using System.Globalization;
 using System.Net;
 using System.Windows.Forms;
 using System.Xml;
@@ -13,15 +12,28 @@ namespace ews_test
         private bool _running;
         private bool _allowHttpUrls;
 
+        private struct AutodiscoverParams
+        {
+            public string Email;
+            public string Username;
+            public string Password;
+            public ExchangeVersion ExchangeVersion;
+            public bool AllowSCP;
+        }
+
         public Form1()
         {
             InitializeComponent();
+
+            comboBoxExchangeVersion.DataSource = Enum.GetValues(typeof(ExchangeVersion));
+            comboBoxExchangeVersion.SelectedItem = ExchangeVersion.Exchange2013;
+
             EnableButtons();
 
             ServicePointManager.ServerCertificateValidationCallback = CertificateValidationCallBack;
         }
 
-        private async void buttonAutoDiscover_Click(object sender, EventArgs e)
+        private async void ButtonAutoDiscover_Click(object sender, EventArgs e)
         {
             textBoxLog.Clear();
             _allowHttpUrls = checkBoxAllowHttp.Checked;
@@ -29,53 +41,57 @@ namespace ews_test
             _running = true;
             EnableButtons();
 
-            await System.Threading.Tasks.Task.Run(() => AutoDiscover());
+            var autodiscoverParams =
+                new AutodiscoverParams
+                {
+                    Email = textBoxEmail.Text?.Trim(),
+                    Username = textBoxUsername.Text?.Trim(),
+                    Password = textBoxPassword.Text?.Trim(),
+                    ExchangeVersion = (ExchangeVersion)comboBoxExchangeVersion.SelectedItem,
+                    AllowSCP = checkBoxAllowSCP.Checked
+                };
+
+            await System.Threading.Tasks.Task.Run(() => AutoDiscover(autodiscoverParams));
 
             _running = false;
             EnableButtons();
         }
 
-        private void textBoxEmail_TextChanged(object sender, EventArgs e)
+        private void TextBoxEmail_TextChanged(object sender, EventArgs e)
         {
             EnableButtons();
         }
 
-        private void textBoxPassword_TextChanged(object sender, EventArgs e)
+        private void TextBoxPassword_TextChanged(object sender, EventArgs e)
         {
             EnableButtons();
         }
 
         private void EnableButtons()
         {
-            buttonAutoDiscover.Enabled = _running == false && string.IsNullOrEmpty(textBoxEmail.Text) == false;
+            buttonAutoDiscover.Enabled = _running == (false && string.IsNullOrEmpty(textBoxEmail.Text) == false && string.IsNullOrEmpty(textBoxPassword.Text) == false);
         }
 
-        public void AutoDiscover()
+        private void AutoDiscover(AutodiscoverParams autodiscoverParams)
         {
-            string emailAddress = textBoxEmail.Text.Trim();
-
-            ExchangeCredentials credential = null;
-            if (string.IsNullOrEmpty(textBoxPassword.Text) == false)
+            ExchangeService service = new ExchangeService(autodiscoverParams.ExchangeVersion, TimeZoneInfo.Utc)
             {
-                string password = textBoxPassword.Text.Trim();
-                credential = new NetworkCredential(emailAddress, password);
-            }
+                Credentials = GetWebCredentials(autodiscoverParams),
+                UserAgent = "ews-test"
+            };
 
-            ExchangeService service = new ExchangeService(ExchangeVersion.Exchange2010, TimeZoneInfo.Utc);
-
-            if (credential != null)
-            {
-                service.Credentials = credential;
-            }
+            // Aids with Exchange diagnostics
+            if (autodiscoverParams.ExchangeVersion >= ExchangeVersion.Exchange2013)
+                service.SendClientLatencies = true;
 
             try
             {
                 // Auto-discover works for both on-prem an cloud Office 365 accounts
-                LogMessage(string.Format(CultureInfo.InvariantCulture,
-                        "Attempting to auto-discover Exchange Server for account '{0}'...", emailAddress));
+                LogMessage($"Attempting to auto-discover Exchange Server for account '{autodiscoverParams.Email}'...");
 
-                // SCP lookup is slow
-                service.EnableScpLookup = false;
+                LogMessage($"Requesting Exchange version: {autodiscoverParams.ExchangeVersion.ToString()}");
+
+                service.EnableScpLookup = autodiscoverParams.AllowSCP;
 
                 service.TraceFlags = TraceFlags.All;
                 service.TraceEnabled = true;
@@ -83,7 +99,7 @@ namespace ews_test
                 service.TraceListener = this;
 
                 // Attempt autodiscovery
-                service.AutodiscoverUrl(emailAddress, RedirectionUrlValidationCallback);
+                service.AutodiscoverUrl(autodiscoverParams.Email, RedirectionUrlValidationCallback);
 
                 service.TraceEnabled = false;
             }
@@ -108,6 +124,22 @@ namespace ews_test
             {
                 LogMessage($"{Environment.NewLine}Discovered Exchange URL: {service.Url}");
             }
+        }
+
+        private WebCredentials GetWebCredentials(AutodiscoverParams autodiscoverParams)
+        {
+            if (string.IsNullOrEmpty(autodiscoverParams.Username) == false)
+            {
+                string[] parts = autodiscoverParams.Username.Split('\\');
+                if (parts.Length == 2 && !string.IsNullOrEmpty(parts[0]) && !string.IsNullOrEmpty(parts[1]))
+                {
+                    return new WebCredentials(parts[1], autodiscoverParams.Password, parts[0]);
+                }
+
+                return new WebCredentials(autodiscoverParams.Username, autodiscoverParams.Password);
+            }
+
+            return new WebCredentials(autodiscoverParams.Email, autodiscoverParams.Password);
         }
 
 
@@ -151,7 +183,7 @@ namespace ews_test
                 XmlNodeList commandNodes = doc.GetElementsByTagName("Trace");
                 foreach (XmlNode node in commandNodes)
                 {
-                    LogMessage($"EWS Autodiscover: {node.InnerText.Replace("\r", "").Replace("\n", "")}");
+                    LogMessage($"EWS Autodiscover: {node.InnerText.Replace("\r\n", "")}");
                 }
             }
             catch (XmlException)
@@ -161,7 +193,6 @@ namespace ews_test
                 LogMessage($"EWS Autodiscover: {traceType}");
             }
         }
-
 
         private bool CertificateValidationCallBack(
             object sender,
